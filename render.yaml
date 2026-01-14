@@ -1,0 +1,23 @@
+# ApexFlow API - Render Deployment Configuration
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: apexflow-api
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements-render.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGO_URL
+        sync: false  # Set manually in Render dashboard
+      - key: DB_NAME
+        value: apexflow
+      - key: DATA_MODE
+        value: demo
+      - key: SIGNAL_MODE
+        value: balanced
+      - key: PYTHON_VERSION
+        value: "3.11.9"
