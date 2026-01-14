@@ -1406,6 +1406,109 @@ async def get_demo_status():
     }
 
 
+@api_router.post("/demo/backfill-narratives")
+async def backfill_missing_narratives():
+    """
+    Backfill missing outcome narratives for all resolved signals.
+    This ensures every resolved signal has:
+    - outcome: WIN/LOSS/BE/INV
+    - narrative: Human-readable explanation
+    
+    Signals without outcome will be marked as INVALIDATED with explanation.
+    """
+    # Find all signals that are resolved but missing narrative
+    missing_narrative_query = {
+        '$or': [
+            {'performance.outcome': {'$exists': True}, 'performance.narrative': {'$exists': False}},
+            {'performance.outcome': {'$exists': True}, 'performance.narrative': None},
+            {'performance.outcome': {'$exists': True}, 'performance.narrative': ''},
+        ]
+    }
+    
+    signals_needing_backfill = await db.signals.find(missing_narrative_query).to_list(length=1000)
+    
+    backfill_count = 0
+    for signal in signals_needing_backfill:
+        outcome = signal.get('performance', {}).get('outcome', 'invalidated')
+        playbook = signal.get('playbook', 'Trend Continuation')
+        regime = signal.get('regime', 'Trending')
+        direction = signal.get('direction', 'BUY')
+        
+        # Generate narrative
+        narrative = generate_outcome_narrative(outcome, playbook, regime, direction)
+        
+        # Update the signal
+        await db.signals.update_one(
+            {'signal_id': signal['signal_id']},
+            {'$set': {'performance.narrative': narrative}}
+        )
+        backfill_count += 1
+    
+    # Also find signals with status that implies resolution but no performance data
+    orphaned_resolved_query = {
+        'status': {'$in': ['tp_hit', 'sl_hit', 'closed_be', 'invalidated', 'expired']},
+        'performance': {'$exists': False}
+    }
+    
+    orphaned_signals = await db.signals.find(orphaned_resolved_query).to_list(length=1000)
+    
+    orphan_count = 0
+    for signal in orphaned_signals:
+        status = signal.get('status', 'invalidated')
+        outcome_map = {
+            'tp_hit': 'win',
+            'sl_hit': 'loss', 
+            'closed_be': 'breakeven',
+            'invalidated': 'invalidated',
+            'expired': 'invalidated'
+        }
+        outcome = outcome_map.get(status, 'invalidated')
+        
+        playbook = signal.get('playbook', 'Trend Continuation')
+        regime = signal.get('regime', 'Trending')
+        direction = signal.get('direction', 'BUY')
+        
+        narrative = generate_outcome_narrative(outcome, playbook, regime, direction)
+        
+        # Calculate R-multiple based on outcome
+        entry = signal.get('entry', 0)
+        stop_loss = signal.get('stop_loss', entry)
+        take_profit = signal.get('take_profit', entry)
+        
+        if outcome == 'win' and entry and stop_loss and take_profit:
+            risk = abs(entry - stop_loss)
+            reward = abs(take_profit - entry)
+            r_multiple = round(reward / risk, 2) if risk > 0 else 1.5
+        elif outcome == 'loss':
+            r_multiple = -1.0
+        else:
+            r_multiple = 0.0
+        
+        performance_data = {
+            'outcome': outcome,
+            'r_multiple': r_multiple,
+            'exit_price': take_profit if outcome == 'win' else (stop_loss if outcome == 'loss' else entry),
+            'pips': 0,
+            'resolved_at': datetime.utcnow().isoformat(),
+            'narrative': narrative,
+            'reason': 'Backfilled from signal status'
+        }
+        
+        await db.signals.update_one(
+            {'signal_id': signal['signal_id']},
+            {'$set': {'performance': performance_data}}
+        )
+        orphan_count += 1
+    
+    return {
+        "status": "success",
+        "narratives_backfilled": backfill_count,
+        "orphaned_signals_fixed": orphan_count,
+        "total_fixed": backfill_count + orphan_count,
+        "message": f"Backfilled {backfill_count} missing narratives and fixed {orphan_count} orphaned signals"
+    }
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
