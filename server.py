@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Header
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -424,9 +424,20 @@ async def resolve_signal(
     signal_id: str,
     outcome: str,
     reason: Optional[str] = None,
-    r_multiple: Optional[float] = None
+    r_multiple: Optional[float] = None,
+    admin_key: Optional[str] = Header(None, alias="X-Admin-Key")
 ):
     """Manually resolve a signal with outcome
+    
+    ⚠️ ADMIN ONLY - User manual resolution is blocked for data integrity.
+    
+    Signals are resolved automatically by the system when:
+    - WIN: Price hits Take Profit
+    - LOSS: Price hits Stop Loss
+    - BREAKEVEN: Time expiry without TP/SL hit
+    - INVALIDATED: Setup invalidation rule triggered
+    
+    This endpoint is for admin/system use only.
     
     Outcome definitions:
     - win: Trade hit take profit
@@ -434,6 +445,19 @@ async def resolve_signal(
     - breakeven: Trade triggered but exited at ~0R (moved to entry)
     - invalidated: Setup expired or never triggered
     """
+    # ============================================
+    # ADMIN AUTHORIZATION CHECK
+    # ============================================
+    # In demo mode, require admin key for manual resolution
+    # In production, this would be proper JWT/OAuth authentication
+    ADMIN_KEY = "apex-admin-2026"  # In production, use environment variable
+    
+    if admin_key != ADMIN_KEY:
+        raise HTTPException(
+            status_code=403, 
+            detail="Forbidden: Signal resolution is system-controlled only. Manual resolution requires admin authorization."
+        )
+    
     # Validate outcome
     valid_outcomes = ['win', 'loss', 'breakeven', 'invalidated']
     if outcome not in valid_outcomes:
