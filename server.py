@@ -1179,7 +1179,8 @@ async def seed_demo_data():
             
             # Generate unique dataset ID for this reset
             dataset_id = f"dataset_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-            seeded_at = datetime.utcnow().isoformat()
+            # Use ISO 8601 format with UTC timezone indicator 'Z'
+            seeded_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.') + f'{datetime.utcnow().microsecond:06d}Z'
             
             # Check existing state
             existing_count = await db.signals.count_documents({})
@@ -1658,7 +1659,7 @@ async def startup_event():
         
         await db.demo_metadata.update_one(
             {'_id': 'seed_info'},
-            {'$set': {'last_seeded_at': datetime.utcnow().isoformat(), 'signals_count': signals_created, 'action': 'auto_seed'}},
+            {'$set': {'last_seeded_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.') + f'{datetime.utcnow().microsecond:06d}Z', 'signals_count': signals_created, 'action': 'auto_seed'}},
             upsert=True
         )
         logger.info(f"Auto-seeded {signals_created} demo signals")
